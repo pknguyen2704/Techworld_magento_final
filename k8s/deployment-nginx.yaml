@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        volumeMounts:
+        - name: nginx-conf
+          mountPath: /etc/nginx/conf.d
+        - name: src-code
+          mountPath: /var/www
+        ports:
+        - containerPort: 80
+      volumes:
+      - name: nginx-conf
+        configMap:
+          name: nginx-config
+      - name: src-code
+        emptyDir: {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  default.conf: |
+    # Nội dung từ magento.conf
+    upstream fastcgi_backend {
+        server app:9000;
+    }
+
+    server {
+        listen 80;
+        error_log  /var/log/nginx/error.log;
+        access_log /var/log/nginx/access.log;
+        server_name techworld.io.vn;
+        set $MAGE_ROOT /var/www/magento;
+        set $MAGE_DEBUG_SHOW_ARGS 1;
+        include /var/www/magento/nginx.conf.sample;
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: nginx

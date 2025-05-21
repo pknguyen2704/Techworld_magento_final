@@ -1,0 +1,64 @@
+name: CI/CD Deploy Magento to GKE
+
+on:
+  push:
+    branches: ["master"]
+
+env:
+  PROJECT_ID: enterprise-452702
+  CLUSTER_NAME: techworld-cluster
+  LOCATION: asia-southeast1-a
+  IMAGE_REGISTRY: gcr.io
+  IMAGE_NAME_APP: techworld-magento
+  IMAGE_NAME_ES: techworld-es
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout source
+      uses: actions/checkout@v3
+
+    - name: Set image tag from commit SHA
+      run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
+
+    - name: Authenticate to GCP
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: '${{ secrets.GCP_SA_KEY }}'
+
+    - name: Configure Docker
+      run: gcloud auth configure-docker gcr.io
+
+    - name: Get GKE Credentials
+      uses: google-github-actions/get-gke-credentials@v2
+      with:
+        cluster_name: ${{ env.CLUSTER_NAME }}
+        location: ${{ env.LOCATION }}
+        project_id: ${{ env.PROJECT_ID }}
+
+    - name: Build & Push Magento app image
+      run: |
+        docker build -t $IMAGE_REGISTRY/$PROJECT_ID/$IMAGE_NAME_APP:$IMAGE_TAG ./docker/php7.4-fpm
+        docker push $IMAGE_REGISTRY/$PROJECT_ID/$IMAGE_NAME_APP:$IMAGE_TAG
+
+    - name: Build & Push Elasticsearch image
+      run: |
+        docker build -t $IMAGE_REGISTRY/$PROJECT_ID/$IMAGE_NAME_ES:$IMAGE_TAG ./docker/elasticsearch
+        docker push $IMAGE_REGISTRY/$PROJECT_ID/$IMAGE_NAME_ES:$IMAGE_TAG
+
+    - name: Update Kubernetes manifests
+      run: |
+        sed -i "s|IMAGE_MAGENTO|$IMAGE_REGISTRY/$PROJECT_ID/$IMAGE_NAME_APP:$IMAGE_TAG|g" k8s/deployment-app.yaml
+        sed -i "s|IMAGE_ES|$IMAGE_REGISTRY/$PROJECT_ID/$IMAGE_NAME_ES:$IMAGE_TAG|g" k8s/deployment-elasticsearch.yaml
+
+    - name: Deploy to GKE
+      run: |
+        kubectl apply -f k8s/
+        kubectl rollout status deployment magento-app
+        kubectl rollout status deployment elasticsearch
+        kubectl rollout status deployment mysql
+        kubectl rollout status deployment redis
+        kubectl rollout status deployment keycloak
+        kubectl rollout status deployment nginx
